@@ -35,6 +35,12 @@ class Rob6323Go2Env(DirectRLEnv):
             self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device
         )
 
+
+        self.Kp = torch.tensor([cfg.Kp] * 12, device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
+        self.Kd = torch.tensor([cfg.Kd] * 12, device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
+        self.motor_offsets = torch.zeros(self.num_envs, 12, device=self.device)
+        self.torque_limits = cfg.torque_limits
+
         # X/Y linear velocity and yaw angular velocity commands
         self._commands = torch.zeros(self.num_envs, 3, device=self.device)
 
@@ -225,3 +231,21 @@ class Rob6323Go2Env(DirectRLEnv):
         arrow_quat = math_utils.quat_mul(base_quat_w, arrow_quat)
 
         return arrow_scale, arrow_quat
+    
+
+    # Part 2.3 of the tutorial
+
+    def _pre_physics_step(self, actions: torch.Tensor) -> None:
+        self._actions = actions.clone()
+
+        self.desired_joint_pos = (self.cfg.action_scale * self._actions + self.robot.data.default_joint_pos)
+
+    def _apply_action(self) -> None:
+        torques = torch.clip(
+            (
+                self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos) -
+                self.Kd * self.robot.data.joint_vel
+            ), -self.torque_limits, self.torque_limits
+        )
+
+        self.robot.set_joint_effort_target(torques)

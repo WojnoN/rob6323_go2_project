@@ -16,6 +16,7 @@ from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.sensors import ContactSensorCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
+from isaaclab.actuators import ImplicitActuatorCfg
 
 @configclass
 class Rob6323Go2EnvCfg(DirectRLEnvCfg):
@@ -28,6 +29,11 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     observation_space = 48
     state_space = 0
     debug_vis = True
+
+    # PD Cotnrol gains
+    Kp = 20.0
+    Kd = 0.5
+    torque_limits = 100.0
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
@@ -56,6 +62,14 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     )
     # robot(s)
     robot_cfg: ArticulationCfg = UNITREE_GO2_CFG.replace(prim_path="/World/envs/env_.*/Robot")
+
+    robot_cfg.actuators["base_legs"] = ImplicitActuatorCfg(
+        joint_names_expr=[".*hip_joint", ".*thigh_joint", ".*calf_joint"],
+        effort_limits=23.5,
+        velocity_limits=30.0,
+        stiffness=0.0,          # 0.0 to disable impmlicit P gain
+        damping=0.0,            # 0.0 to disable impmlicit D gain
+    )
 
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
