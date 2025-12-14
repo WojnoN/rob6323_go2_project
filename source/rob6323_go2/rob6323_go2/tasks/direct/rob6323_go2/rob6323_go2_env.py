@@ -76,7 +76,10 @@ class Rob6323Go2Env(DirectRLEnv):
         # add handle for debug visualization (this is set to a valid handle inside set_debug_vis)
         self.set_debug_vis(self.cfg.debug_vis)
 
-        self.last_actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device, requires_grad=False)
+        # Track last two action steps for action rate penalties
+        self.last_actions = torch.zeros(
+            self.num_envs, gym.spaces.flatdim(self.single_action_space), 2, device=self.device, requires_grad=False
+        )
 
 
     @property
@@ -144,14 +147,18 @@ class Rob6323Go2Env(DirectRLEnv):
         yaw_rate_error_mapped = torch.exp(-yaw_rate_error / 0.25)
         
         # First Derivative
-        rew_action_rate = torch.sum(torch.square(self._actions - self.last_actions[:,:, 0]), dim=1) * (self.cfg.acition_scale **2)
+        rew_action_rate = torch.sum(torch.square(self._actions - self.last_actions[:, :, 0]), dim=1) * (
+            self.cfg.action_scale**2
+        )
 
         # Second Derivative
-        rew_action_rate += torch.sum(torch.square(self._actions - 2 * self.last_actions[:,:, 0] + self.last_actions[:,:, 1]), dim=1) * (self.cfg.action_scale **2)
+        rew_action_rate += torch.sum(
+            torch.square(self._actions - 2 * self.last_actions[:, :, 0] + self.last_actions[:, :, 1]), dim=1
+        ) * (self.cfg.action_scale**2)
 
         # Update the previous action hist
         self.last_actions = torch.roll(self.last_actions, 1, 2)
-        self.last_actions[:,:, 0] = self._actions[:]
+        self.last_actions[:, :, 0] = self._actions[:]
 
         self._step_contact_targets()
         rew_raibert_heuristic = self._reward_raibert_heuristic()
