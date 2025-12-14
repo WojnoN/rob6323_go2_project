@@ -30,6 +30,8 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     state_space = 0
     debug_vis = True
 
+    base_height_min = 0.20  # Termination height
+
     # PD Cotnrol gains
     Kp = 20.0
     Kd = 0.5
