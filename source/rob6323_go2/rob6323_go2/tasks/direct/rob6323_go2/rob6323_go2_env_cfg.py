@@ -76,8 +76,8 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
 
     robot_cfg.actuators["base_legs"] = ImplicitActuatorCfg(
         joint_names_expr=[".*hip_joint", ".*thigh_joint", ".*calf_joint"],
-        effort_limits=23.5,
-        velocity_limits=30.0,
+        effort_limit=23.5,
+        velocity_limit=30.0,
         stiffness=0.0,          # 0.0 to disable impmlicit P gain
         damping=0.0,            # 0.0 to disable impmlicit D gain
     )
