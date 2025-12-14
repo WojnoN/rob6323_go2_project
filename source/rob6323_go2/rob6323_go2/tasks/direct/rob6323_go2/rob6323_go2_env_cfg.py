@@ -16,6 +16,7 @@ from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.sensors import ContactSensorCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
+from isaaclab.actuators import ImplicitActuatorCfg
 
 @configclass
 class Rob6323Go2EnvCfg(DirectRLEnvCfg):
@@ -25,9 +26,25 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # - spaces definition
     action_scale = 0.25
     action_space = 12
-    observation_space = 48
+    observation_space = 48 + 4 # Adding # of clock inputs
     state_space = 0
     debug_vis = True
+
+    # Termination Conditions
+    base_height_min = 0.20  # Termination height
+
+    # PD Control gains
+    Kp = 20.0
+    Kd = 0.5
+    torque_limits = 100.0
+
+    # Reward Scales
+    raibert_heuristic_reward_scale = -10.0
+    feet_clearence_reward_scale = -30.0
+    tracking_contacts_shaped_force_reward_scale = 4.0
+
+
+
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
@@ -56,6 +73,14 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     )
     # robot(s)
     robot_cfg: ArticulationCfg = UNITREE_GO2_CFG.replace(prim_path="/World/envs/env_.*/Robot")
+
+    robot_cfg.actuators["base_legs"] = ImplicitActuatorCfg(
+        joint_names_expr=[".*hip_joint", ".*thigh_joint", ".*calf_joint"],
+        effort_limits=23.5,
+        velocity_limits=30.0,
+        stiffness=0.0,          # 0.0 to disable impmlicit P gain
+        damping=0.0,            # 0.0 to disable impmlicit D gain
+    )
 
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
