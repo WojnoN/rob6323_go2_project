@@ -26,16 +26,25 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # - spaces definition
     action_scale = 0.25
     action_space = 12
-    observation_space = 48
+    observation_space = 48 + 4 # Adding # of clock inputs
     state_space = 0
     debug_vis = True
 
+    # Termination Conditions
     base_height_min = 0.20  # Termination height
 
-    # PD Cotnrol gains
+    # PD Control gains
     Kp = 20.0
     Kd = 0.5
     torque_limits = 100.0
+
+    # Reward Scales
+    raibert_heuristic_reward_scale = -10.0
+    feet_clearence_reward_scale = -30.0
+    tracking_contacts_shaped_force_reward_scale = 4.0
+
+
+
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
