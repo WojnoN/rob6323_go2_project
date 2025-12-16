@@ -164,19 +164,20 @@ class Rob6323Go2Env(DirectRLEnv):
         # 1. Penalize non-vertical orientation (projected gravity on XY plane)
         # Hint: We want the robot to stay upright, so gravity should only project onto Z.
         # Calculate the sum of squares of the X and Y components of projected_gravity_b.
-        rew_orient = torch.sum(torch.square(self.robot.projected_gravity_b[:2]))
+        projected_gravity_xy = self.robot.data.projected_gravity_b[:, :2]
+        rew_orient = torch.sum(torch.square(projected_gravity_xy), dim=1)
 
         # 2. Penalize vertical velocity (z-component of base linear velocity)
         # Hint: Square the Z component of the base linear velocity.
-        rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_b[2])
+        rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_b[:, 2])
 
         # 3. Penalize high joint velocities
         # Hint: Sum the squares of all joint velocities.
-        rew_dof_vel = torch.sum(torch.square(self.robot.data.joint_vel))
+        rew_dof_vel = torch.sum(torch.square(self.robot.data.joint_vel), dim=1)
 
         # 4. Penalize angular velocity in XY plane (roll/pitch)
         # Hint: Sum the squares of the X and Y components of the base angular velocity.
-        rew_ang_vel_xy = torch.sum(torch.square(self.robot.root_ang_vel_b[:2]))
+        rew_ang_vel_xy = torch.sum(torch.square(self.robot.data.root_ang_vel_b[:, :2]), dim=1)
 
         # Update the previous action hist
         self.last_actions = torch.roll(self.last_actions, 1, 2)
