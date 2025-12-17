@@ -435,7 +435,7 @@ class Rob6323Go2Env(DirectRLEnv):
     def _reward_feet_clearance(self):
         # Penalize feet too low during swing phase
         foot_heights = self.foot_positions_w[:, :, 2]
-        target_height = 0.06
+        target_height = 0.07
         
         # swing phase when foot_indices > 0.5
         swing_mask = self.foot_indices > 0.5
