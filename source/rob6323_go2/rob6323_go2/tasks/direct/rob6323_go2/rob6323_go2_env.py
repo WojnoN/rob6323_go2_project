@@ -341,7 +341,7 @@ class Rob6323Go2Env(DirectRLEnv):
         phases = 0.5
         offsets = 0.
         bounds = 0.
-        durations = 0.5 * torch.ones((self.num_envs,), dtype=torch.float32, device=self.device)
+        durations = 0.25 * torch.ones((self.num_envs,), dtype=torch.float32, device=self.device)
         self.gait_indices = torch.remainder(self.gait_indices + self.step_dt * frequencies, 1.0)
 
         foot_indices = [self.gait_indices + phases + offsets + bounds,
