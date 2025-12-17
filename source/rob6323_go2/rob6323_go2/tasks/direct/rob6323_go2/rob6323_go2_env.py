@@ -47,11 +47,19 @@ class Rob6323Go2Env(DirectRLEnv):
         self._commands = torch.zeros(self.num_envs, 3, device=self.device)
 
         # Getting Specific body indices
-        self._feet_ids = []
         foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
+        
+        # Feet indices in ROBOT (for positions/kinematics)
+        self._feet_ids = []
         for name in foot_names:
             id_list, _ = self.robot.find_bodies(name)
             self._feet_ids.append(id_list[0])
+        
+        # Feet indices in CONTACT SENSOR (for forces)
+        self._feet_ids_sensor = []
+        for name in foot_names:
+            id_list, _ = self._contact_sensor.find_bodies(name)
+            self._feet_ids_sensor.append(id_list[0])
 
         # Variables for raibert heuristic
         self.gait_indices = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
@@ -70,7 +78,9 @@ class Rob6323Go2Env(DirectRLEnv):
                 "orient",
                 "lin_vel_z",
                 "dof_vel",
-                "ang_vel_xy"
+                "ang_vel_xy",
+                "feet_clearance",
+                "tracking_contacts_shaped_force"
             ]
         }
         # Get specific body indices
@@ -185,6 +195,8 @@ class Rob6323Go2Env(DirectRLEnv):
 
         self._step_contact_targets()
         rew_raibert_heuristic = self._reward_raibert_heuristic()
+        rew_feet_clearance = self._reward_feet_clearance()
+        rew_tracking_contacts_shaped_force = self._reward_tracking_contacts_shaped_force()
 
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale,
@@ -195,6 +207,8 @@ class Rob6323Go2Env(DirectRLEnv):
             "lin_vel_z": rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,
             "dof_vel": rew_dof_vel * self.cfg.dof_vel_reward_scale,
             "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,
+            "feet_clearance": rew_feet_clearance * self.cfg.feet_clearence_reward_scale,
+            "tracking_contacts_shaped_force": rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale,
         }
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
         # Logging
@@ -415,3 +429,34 @@ class Rob6323Go2Env(DirectRLEnv):
         reward = torch.sum(torch.square(err_raibert_heuristic), dim=(1, 2))
 
         return reward
+
+    # Part 6 Foot Interaction Rewards
+    
+    def _reward_feet_clearance(self):
+        # Penalize feet too low during swing phase
+        foot_heights = self.foot_positions_w[:, :, 2]
+        target_height = 0.06
+        
+        # swing phase when foot_indices > 0.5
+        swing_mask = self.foot_indices > 0.5
+        
+        clearance_error = target_height - foot_heights
+        clearance_error = torch.clamp(clearance_error, min=0.0)
+        clearance_error = clearance_error * swing_mask.float()
+        
+        reward = torch.sum(torch.square(clearance_error), dim=1)
+        return reward
+
+    def _reward_tracking_contacts_shaped_force(self):
+        # Reward contact forces during stance phase
+        # Use _feet_ids_sensor for contact sensor indexing
+        contact_forces = self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, :]
+        force_magnitude = torch.norm(contact_forces, dim=-1)
+        
+        force_threshold = 1.0
+        contact_indicator = torch.clamp(force_magnitude / force_threshold, max=1.0)
+        
+        # Reward when desired_contact_states is high and feet are in contact
+        reward = torch.sum(self.desired_contact_states * contact_indicator, dim=1)
+        return reward
+
