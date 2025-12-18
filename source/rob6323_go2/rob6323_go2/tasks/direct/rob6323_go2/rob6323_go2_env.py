@@ -359,8 +359,10 @@ class Rob6323Go2Env(DirectRLEnv):
             idxs[swing_idxs] = 0.5 + (torch.remainder(idxs[swing_idxs], 1) - durations[swing_idxs]) * (
                         0.5 / (1 - durations[swing_idxs]))
 
-        self.clock_inputs[:, 0] = torch.sin(2 * np.pi * foot_indices[0])
-        self.clock_inputs[:, 1] = torch.sin(2 * np.pi * foot_indices[1])
+        # self.clock_inputs[:, 0] = torch.sin(2 * np.pi * foot_indices[0])
+        # self.clock_inputs[:, 1] = torch.sin(2 * np.pi * foot_indices[1])
+        self.clock_inputs[:, 0] = torch.pi
+        self.clock_inputs[:, 1] = torch.pi
         self.clock_inputs[:, 2] = torch.sin(2 * np.pi * foot_indices[2])
         self.clock_inputs[:, 3] = torch.sin(2 * np.pi * foot_indices[3])
 
@@ -389,6 +391,8 @@ class Rob6323Go2Env(DirectRLEnv):
                                             1 - smoothing_cdf_start(
                                         torch.remainder(foot_indices[3], 1.0) - 0.5 - 1)))
 
+        # self.desired_contact_states[:, 0] = smoothing_multiplier_FL
+        # self.desired_contact_states[:, 1] = smoothing_multiplier_FR
         self.desired_contact_states[:, 0] = smoothing_multiplier_FL
         self.desired_contact_states[:, 1] = smoothing_multiplier_FR
         self.desired_contact_states[:, 2] = smoothing_multiplier_RL
@@ -435,12 +439,19 @@ class Rob6323Go2Env(DirectRLEnv):
     def _reward_feet_clearance(self):
         # Penalize feet too low during swing phase
         foot_heights = self.foot_positions_w[:, :, 2]
-        target_height = 0.07
+        front_foot_heights = foot_heights[:2]
+        back_foot_heights = foot_heights[2:]
+        back_target = 0.07
+
+        front_target = 1.0
         
         # swing phase when foot_indices > 0.5
         swing_mask = self.foot_indices > 0.5
+        swing_mask[:2] = 1
         
-        clearance_error = target_height - foot_heights
+        clearance_error = torch.zeros(4)
+        clearance_error[:2] = front_target - front_foot_heights
+        clearance_error[2:] = back_target - back_foot_heights
         clearance_error = torch.clamp(clearance_error, min=0.0)
         clearance_error = clearance_error * swing_mask.float()
         
@@ -455,6 +466,7 @@ class Rob6323Go2Env(DirectRLEnv):
         
         force_threshold = 1.0
         contact_indicator = torch.clamp(force_magnitude / force_threshold, max=1.0)
+        contact_indicator[:2] = 0.0
         
         # Reward when desired_contact_states is high and feet are in contact
         reward = torch.sum(self.desired_contact_states * contact_indicator, dim=1)
