@@ -449,9 +449,12 @@ class Rob6323Go2Env(DirectRLEnv):
         swing_mask = self.foot_indices > 0.5
         swing_mask[:2] = 1
         
-        clearance_error = torch.zeros(4)
-        clearance_error[:,:2] = front_target - front_foot_heights
-        clearance_error[:,2:] = back_target - back_foot_heights
+        front_clearance_error = front_target - front_foot_heights
+        back_clearance_error = back_target - back_foot_heights
+        print(front_clearance_error.shape)
+        print(back_clearance_error.shape)
+        clearance_error = torch.concat((front_clearance_error, back_clearance_error), dim = 0)
+        print(clearance_error.shape)
         clearance_error = torch.clamp(clearance_error, min=0.0)
         clearance_error = clearance_error * swing_mask.float()
         
