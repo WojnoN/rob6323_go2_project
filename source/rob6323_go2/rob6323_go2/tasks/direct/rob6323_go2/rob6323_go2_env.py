@@ -46,6 +46,10 @@ class Rob6323Go2Env(DirectRLEnv):
         # X/Y linear velocity and yaw angular velocity commands
         self._commands = torch.zeros(self.num_envs, 3, device=self.device)
 
+        # Friction epsilons
+        self.eps_f = torch.random.uniform(0.0, 2.5)
+        self.eps_mu = torch.random.uniform(0.0, 0.3)
+
         # Getting Specific body indices
         foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
         
@@ -240,7 +244,9 @@ class Rob6323Go2Env(DirectRLEnv):
         self._actions[env_ids] = 0.0
         self._previous_actions[env_ids] = 0.0
         # Sample new commands
+        
         self._commands[env_ids] = torch.zeros_like(self._commands[env_ids]).uniform_(-1.0, 1.0)
+        
         # Reset robot state
         joint_pos = self.robot.data.default_joint_pos[env_ids]
         joint_vel = self.robot.data.default_joint_vel[env_ids]
@@ -249,7 +255,12 @@ class Rob6323Go2Env(DirectRLEnv):
         self.robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)       # 
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)        # 
-        self.gait_indices[env_ids] = 0                                                  # Gait index reset
+        self.gait_indices[env_ids] = 0     
+        
+        # Reset Random
+        self.eps_f = torch.random.uniform(0.0, 2.5)
+        self.eps_mu = torch.random.uniform(0.0, 0.3)
+                                                     # Gait index reset
         # Logging
         extras = dict()
         for key in self._episode_sums.keys():
@@ -324,6 +335,12 @@ class Rob6323Go2Env(DirectRLEnv):
         self.desired_joint_pos = (self.cfg.action_scale * self._actions + self.robot.data.default_joint_pos)
 
     def _apply_action(self) -> None:
+        # Friction calculation
+        stiction = self.eps_f * math.tanh(self.robot.data.joint_vel / 0.1)
+        viscous = self.eps_mu * self.robot.data.joint_vel
+        friction_torque = stiction + viscous
+
+        # PD Control Law
         torques = torch.clip(
             (
                 self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos) -
@@ -331,7 +348,7 @@ class Rob6323Go2Env(DirectRLEnv):
             ), -self.torque_limits, self.torque_limits
         )
 
-        self.robot.set_joint_effort_target(torques)
+        self.robot.set_joint_effort_target(torques-friction_torque)
 
     # Part 4.4
 
