@@ -56,7 +56,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     hop_air_time_threshold = 0.05
     hop_height_complete_threshold = 0.32
     hop_height_start_threshold = 0.30
-    front_impulse_force_threshold = 80.0
+    front_impulse_force_threshold = 0.50
 
     # Additional reward scales
     orient_reward_scale = -10.0
