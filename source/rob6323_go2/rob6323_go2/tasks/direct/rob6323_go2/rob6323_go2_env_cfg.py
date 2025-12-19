@@ -17,6 +17,8 @@ from isaaclab.sensors import ContactSensorCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 from isaaclab.actuators import ImplicitActuatorCfg
+from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
+
 
 @configclass
 class Rob6323Go2EnvCfg(DirectRLEnvCfg):
@@ -62,6 +64,8 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
             restitution=0.0,
         ),
     )
+
+    # terrain
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="generator",
