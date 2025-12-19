@@ -211,8 +211,8 @@ class Rob6323Go2Env(DirectRLEnv):
         front_stall_penalty = front_contact_any.float()
         liftoff_bonus = liftoff.float()
 
-        # Encourage a pitched-back posture to balance on the rear legs.
-        target_pitch = 0.35
+        # Encourage a vertical (upright) posture.
+        target_pitch = self.cfg.orient_target_pitch
         target_gravity_b = torch.tensor(
             [math.sin(target_pitch), 0.0, -math.cos(target_pitch)],
             device=self.device,
