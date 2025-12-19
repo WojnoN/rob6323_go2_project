@@ -26,12 +26,12 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # - spaces definition
     action_scale = 0.25
     action_space = 12
-    observation_space = 48 + 4 # Adding # of clock inputs
+    observation_space = 48 + 4  # 4 clock inputs for quadruped
     state_space = 0
     debug_vis = True
 
     # Termination Conditions
-    base_height_min = 0.20  # Termination height
+    base_height_min = 0.20
 
     # PD Control gains
     Kp = 20.0
@@ -39,15 +39,22 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     torque_limits = 100.0
 
     # Reward Scales
-    raibert_heuristic_reward_scale = -10.0
-    feet_clearence_reward_scale = -60.0
-    tracking_contacts_shaped_force_reward_scale = 40.0
+    raibert_heuristic_reward_scale = -5.0
+    feet_clearence_reward_scale = -30.0
+    tracking_contacts_shaped_force_reward_scale = 20.0
 
     # Additional reward scales
-    orient_reward_scale = -5.0
+    orient_reward_scale = -3.0
     lin_vel_z_reward_scale = -0.02
     dof_vel_reward_scale = -0.0001
     ang_vel_xy_reward_scale = -0.001
+    
+    # Bipedal rewards
+    front_feet_air_reward_scale = 30.0
+    back_feet_contact_reward_scale = 10.0
+    front_legs_pose_reward_scale = 5.0
+    base_height_reward_scale = 10.0
+    thigh_contact_reward_scale = -50.0
 
 
     # simulation
@@ -82,8 +89,8 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
         joint_names_expr=[".*hip_joint", ".*thigh_joint", ".*calf_joint"],
         effort_limit=23.5,
         velocity_limit=30.0,
-        stiffness=0.0,          # 0.0 to disable impmlicit P gain
-        damping=0.0,            # 0.0 to disable impmlicit D gain
+        stiffness=0.0,
+        damping=0.0,
     )
 
     # scene

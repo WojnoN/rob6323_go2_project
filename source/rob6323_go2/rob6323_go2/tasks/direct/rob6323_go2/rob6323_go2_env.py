@@ -46,7 +46,7 @@ class Rob6323Go2Env(DirectRLEnv):
         # X/Y linear velocity and yaw angular velocity commands
         self._commands = torch.zeros(self.num_envs, 3, device=self.device)
 
-        # Getting Specific body indices
+        # All four feet
         foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
         
         # Feet indices in ROBOT (for positions/kinematics)
@@ -61,9 +61,24 @@ class Rob6323Go2Env(DirectRLEnv):
             id_list, _ = self._contact_sensor.find_bodies(name)
             self._feet_ids_sensor.append(id_list[0])
 
-        # Variables for raibert heuristic
+        # Front feet indices (FL=0, FR=1) and back feet indices (RL=2, RR=3)
+        self._front_feet_idx = [0, 1]
+        self._back_feet_idx = [2, 3]
+
+        # Front leg joint indices: [FL_hip, FL_thigh, FL_calf, FR_hip, FR_thigh, FR_calf]
+        self._front_leg_joint_idx = torch.tensor([0, 1, 2, 3, 4, 5], device=self.device)
+        # Target: legs tucked up (hip=0, thigh=1.5 rad up, calf=-2.5 bent)
+        self._front_legs_target_pos = torch.tensor([0.0, 1.5, -2.5, 0.0, 1.5, -2.5], device=self.device)
+
+        # Thigh indices for contact penalty (don't want thighs on ground)
+        self._thigh_ids_sensor = []
+        for name in ["RL_thigh", "RR_thigh"]:
+            id_list, _ = self._contact_sensor.find_bodies(name)
+            self._thigh_ids_sensor.append(id_list[0])
+
+        # Variables for quadruped gait (4 feet)
         self.gait_indices = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
-        self.clock_inputs = torch.zeros(self.num_envs, 4, dtype=torch.float ,device=self.device, requires_grad=False)
+        self.clock_inputs = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)
         self.desired_contact_states = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)    
 
 
@@ -80,7 +95,12 @@ class Rob6323Go2Env(DirectRLEnv):
                 "dof_vel",
                 "ang_vel_xy",
                 "feet_clearance",
-                "tracking_contacts_shaped_force"
+                "tracking_contacts_shaped_force",
+                "front_feet_air",
+                "back_feet_contact",
+                "front_legs_pose",
+                "base_height",
+                "thigh_contact"
             ]
         }
         # Get specific body indices
@@ -197,6 +217,11 @@ class Rob6323Go2Env(DirectRLEnv):
         rew_raibert_heuristic = self._reward_raibert_heuristic()
         rew_feet_clearance = self._reward_feet_clearance()
         rew_tracking_contacts_shaped_force = self._reward_tracking_contacts_shaped_force()
+        rew_front_feet_air = self._reward_front_feet_air()
+        rew_back_feet_contact = self._reward_back_feet_contact()
+        rew_front_legs_pose = self._reward_front_legs_pose()
+        rew_base_height = self._reward_base_height()
+        rew_thigh_contact = self._reward_thigh_contact()
 
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale,
@@ -209,6 +234,11 @@ class Rob6323Go2Env(DirectRLEnv):
             "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,
             "feet_clearance": rew_feet_clearance * self.cfg.feet_clearence_reward_scale,
             "tracking_contacts_shaped_force": rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale,
+            "front_feet_air": rew_front_feet_air * self.cfg.front_feet_air_reward_scale,
+            "back_feet_contact": rew_back_feet_contact * self.cfg.back_feet_contact_reward_scale,
+            "front_legs_pose": rew_front_legs_pose * self.cfg.front_legs_pose_reward_scale,
+            "base_height": rew_base_height * self.cfg.base_height_reward_scale,
+            "thigh_contact": rew_thigh_contact * self.cfg.thigh_contact_reward_scale,
         }
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
         # Logging
@@ -333,9 +363,7 @@ class Rob6323Go2Env(DirectRLEnv):
 
         self.robot.set_joint_effort_target(torques)
 
-    # Part 4.4
-
-    # Defines Contact Plan
+    # Quadruped gait contact plan (4 feet)
     def _step_contact_targets(self):
         frequencies = 3.
         phases = 0.5
@@ -364,9 +392,8 @@ class Rob6323Go2Env(DirectRLEnv):
         self.clock_inputs[:, 2] = torch.sin(2 * np.pi * foot_indices[2])
         self.clock_inputs[:, 3] = torch.sin(2 * np.pi * foot_indices[3])
 
-        # von mises distribution
         kappa = 0.07
-        smoothing_cdf_start = torch.distributions.normal.Normal(0, kappa).cdf  # (x) + torch.distributions.normal.Normal(1, kappa).cdf(x)) / 2
+        smoothing_cdf_start = torch.distributions.normal.Normal(0, kappa).cdf
 
         smoothing_multiplier_FL = (smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0)) * (
                 1 - smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0) - 0.5)) +
@@ -394,7 +421,7 @@ class Rob6323Go2Env(DirectRLEnv):
         self.desired_contact_states[:, 2] = smoothing_multiplier_RL
         self.desired_contact_states[:, 3] = smoothing_multiplier_RR
 
-    # Part 4.5
+    # Quadruped Raibert heuristic (4 feet)
     def _reward_raibert_heuristic(self):
         cur_footsteps_translated = self.foot_positions_w - self.robot.data.root_pos_w.unsqueeze(1)
         footsteps_in_body_frame = torch.zeros(self.num_envs, 4, 3, device=self.device)
@@ -402,14 +429,13 @@ class Rob6323Go2Env(DirectRLEnv):
             footsteps_in_body_frame[:, i, :] = math_utils.quat_apply_yaw(math_utils.quat_conjugate(self.robot.data.root_quat_w),
                                                             cur_footsteps_translated[:, i, :])
 
-        # nominal positions: [FR, FL, RR, RL]
+        # nominal positions: [FL, FR, RL, RR]
         desired_stance_width = 0.25
         desired_ys_nom = torch.tensor([desired_stance_width / 2, -desired_stance_width / 2, desired_stance_width / 2, -desired_stance_width / 2], device=self.device).unsqueeze(0)
 
         desired_stance_length = 0.45
-        desired_xs_nom = torch.tensor([desired_stance_length / 2,  desired_stance_length / 2, -desired_stance_length / 2, -desired_stance_length / 2], device=self.device).unsqueeze(0)
+        desired_xs_nom = torch.tensor([desired_stance_length / 2, desired_stance_length / 2, -desired_stance_length / 2, -desired_stance_length / 2], device=self.device).unsqueeze(0)
 
-        # raibert offsets
         phases = torch.abs(1.0 - (self.foot_indices * 2.0)) * 1.0 - 0.5
         frequencies = torch.tensor([3.0], device=self.device)
         x_vel_des = self._commands[:, 0:1]
@@ -433,11 +459,9 @@ class Rob6323Go2Env(DirectRLEnv):
     # Part 6 Foot Interaction Rewards
     
     def _reward_feet_clearance(self):
-        # Penalize feet too low during swing phase
         foot_heights = self.foot_positions_w[:, :, 2]
         target_height = 0.07
         
-        # swing phase when foot_indices > 0.5
         swing_mask = self.foot_indices > 0.5
         
         clearance_error = target_height - foot_heights
@@ -448,15 +472,45 @@ class Rob6323Go2Env(DirectRLEnv):
         return reward
 
     def _reward_tracking_contacts_shaped_force(self):
-        # Reward contact forces during stance phase
-        # Use _feet_ids_sensor for contact sensor indexing
         contact_forces = self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, :]
         force_magnitude = torch.norm(contact_forces, dim=-1)
         
         force_threshold = 1.0
         contact_indicator = torch.clamp(force_magnitude / force_threshold, max=1.0)
         
-        # Reward when desired_contact_states is high and feet are in contact
         reward = torch.sum(self.desired_contact_states * contact_indicator, dim=1)
         return reward
+
+    def _reward_front_feet_air(self):
+        front_feet_heights = self.foot_positions_w[:, self._front_feet_idx, 2]
+        target_height = 0.1
+        reward = torch.mean(torch.clamp(front_feet_heights / target_height, max=1.0), dim=1)
+        return reward
+
+    def _reward_back_feet_contact(self):
+        back_feet_sensor_ids = [self._feet_ids_sensor[i] for i in self._back_feet_idx]
+        contact_forces = self._contact_sensor.data.net_forces_w[:, back_feet_sensor_ids, :]
+        force_magnitude = torch.norm(contact_forces, dim=-1)
+        contact_indicator = (force_magnitude > 1.0).float()
+        reward = torch.mean(contact_indicator, dim=1)
+        return reward
+
+    def _reward_front_legs_pose(self):
+        front_joint_pos = self.robot.data.joint_pos[:, self._front_leg_joint_idx]
+        error = torch.sum(torch.square(front_joint_pos - self._front_legs_target_pos), dim=1)
+        reward = torch.exp(-error / 2.0)
+        return reward
+
+    def _reward_base_height(self):
+        base_height = self.robot.data.root_pos_w[:, 2]
+        target_height = 0.35
+        reward = torch.clamp(base_height / target_height, max=1.0)
+        return reward
+
+    def _reward_thigh_contact(self):
+        contact_forces = self._contact_sensor.data.net_forces_w[:, self._thigh_ids_sensor, :]
+        force_magnitude = torch.norm(contact_forces, dim=-1)
+        contact_indicator = (force_magnitude > 1.0).float()
+        penalty = torch.sum(contact_indicator, dim=1)
+        return penalty
 
