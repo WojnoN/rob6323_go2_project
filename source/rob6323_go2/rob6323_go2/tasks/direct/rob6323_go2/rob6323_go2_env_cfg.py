@@ -17,6 +17,7 @@ from isaaclab.sensors import ContactSensorCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 from isaaclab.actuators import ImplicitActuatorCfg
+
 # from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
 from isaaclab.sim import PhysxCfg
 from isaaclab.terrains import TerrainGeneratorCfg
@@ -82,7 +83,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
         sub_terrains={
             "hf_random_uniform": HfRandomUniformTerrainCfg(
                 proportion=1.0,            # always choose this terrain type :contentReference[oaicite:5]{index=5}
-                noise_range=(0.0, 0.06),   # min/max height noise (m) :contentReference[oaicite:6]{index=6}
+                noise_range=(0.0, 0.12),   # min/max height noise (m) :contentReference[oaicite:6]{index=6}
                 noise_step=0.01,           # height quantization step (m) :contentReference[oaicite:7]{index=7}
                 # downsampled_scale=0.2,   # optional: sample on coarser grid then interpolate :contentReference[oaicite:8]{index=8}
             )
@@ -94,7 +95,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
         prim_path="/World/ground",
         terrain_type="generator",
         terrain_generator=RANDOM_UNIFORM_TERRAIN_CFG,
-        max_init_terrain_level=5,
+        max_init_terrain_level=6,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
