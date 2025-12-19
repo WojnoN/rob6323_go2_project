@@ -63,6 +63,9 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
             dynamic_friction=1.0,
             restitution=0.0,
         ),
+        physx=PhysxCfg(
+        gpu_max_rigid_patch_count=2**24,
+    ),
     )
 
     # terrain
