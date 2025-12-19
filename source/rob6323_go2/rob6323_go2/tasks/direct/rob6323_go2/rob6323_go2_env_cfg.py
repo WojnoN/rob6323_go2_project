@@ -19,6 +19,8 @@ from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, G
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
 
+from isaaclab.sim import PhysxCfg
+
 
 @configclass
 class Rob6323Go2EnvCfg(DirectRLEnvCfg):
