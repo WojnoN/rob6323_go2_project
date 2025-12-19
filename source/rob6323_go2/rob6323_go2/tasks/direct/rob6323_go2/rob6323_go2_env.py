@@ -47,8 +47,8 @@ class Rob6323Go2Env(DirectRLEnv):
         self._commands = torch.zeros(self.num_envs, 3, device=self.device)
 
         # Friction epsilons
-        self.eps_f = torch.random.uniform(0.0, 2.5)
-        self.eps_mu = torch.random.uniform(0.0, 0.3)
+        self.eps_f = torch.rand(1, device=self.device)*2.5
+        self.eps_mu = torch.rand(1, device=self.device)*0.3
 
         # Getting Specific body indices
         foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
@@ -258,8 +258,8 @@ class Rob6323Go2Env(DirectRLEnv):
         self.gait_indices[env_ids] = 0     
         
         # Reset Random
-        self.eps_f = torch.random.uniform(0.0, 2.5)
-        self.eps_mu = torch.random.uniform(0.0, 0.3)
+        self.eps_f = torch.rand(1, device=self.device)*2.5
+        self.eps_mu = torch.rand(1, device=self.device)*0.3
                                                      # Gait index reset
         # Logging
         extras = dict()
@@ -336,7 +336,7 @@ class Rob6323Go2Env(DirectRLEnv):
 
     def _apply_action(self) -> None:
         # Friction calculation
-        stiction = self.eps_f * math.tanh(self.robot.data.joint_vel / 0.1)
+        stiction = self.eps_f * torch.tanh(self.robot.data.joint_vel / 0.1)
         viscous = self.eps_mu * self.robot.data.joint_vel
         friction_torque = stiction + viscous
 
