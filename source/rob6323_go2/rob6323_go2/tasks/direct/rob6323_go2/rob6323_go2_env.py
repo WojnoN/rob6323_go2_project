@@ -65,6 +65,10 @@ class Rob6323Go2Env(DirectRLEnv):
         self.gait_indices = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.clock_inputs = torch.zeros(self.num_envs, 4, dtype=torch.float ,device=self.device, requires_grad=False)
         self.desired_contact_states = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)    
+        # Hop tracking
+        self.front_contact_prev = torch.zeros(self.num_envs, 2, dtype=torch.bool, device=self.device, requires_grad=False)
+        self.front_air_steps = torch.zeros(self.num_envs, dtype=torch.int, device=self.device, requires_grad=False)
+        self.hop_complete = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
 
 
         # Logging
@@ -83,6 +87,12 @@ class Rob6323Go2Env(DirectRLEnv):
                 "feet_clearance",
                 "rear_contact",
                 "front_contact",
+                "front_hop_impulse",
+                "hop_up_vel",
+                "hop_height",
+                "hop_pitch_rate",
+                "front_stall_penalty",
+                "liftoff_bonus",
             ]
         }
         # Get specific body indices
@@ -156,6 +166,25 @@ class Rob6323Go2Env(DirectRLEnv):
         return observations
 
     def _get_rewards(self) -> torch.Tensor:
+        contact_forces = self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, :]
+        force_magnitude = torch.norm(contact_forces, dim=-1)
+        front_contact = force_magnitude[:, :2] > self.cfg.contact_force_threshold
+        rear_contact = force_magnitude[:, 2:] > self.cfg.contact_force_threshold
+        front_contact_any = torch.any(front_contact, dim=1)
+        liftoff = torch.logical_and(torch.any(self.front_contact_prev, dim=1), torch.logical_not(front_contact_any))
+
+        # Track front air time to detect hop completion
+        front_air = torch.logical_not(front_contact_any)
+        self.front_air_steps = torch.where(front_air, self.front_air_steps + 1, torch.zeros_like(self.front_air_steps))
+        front_air_time = self.front_air_steps.float() * self.step_dt
+        base_height = self.robot.data.root_pos_w[:, 2]
+        hop_complete_now = (front_air_time > self.cfg.hop_air_time_threshold) | (
+            base_height > self.cfg.hop_height_complete_threshold
+        )
+        self.hop_complete = torch.logical_or(self.hop_complete, hop_complete_now)
+        hop_mask = torch.logical_not(self.hop_complete).float()
+        post_hop_mask = self.hop_complete.float()
+
         # linear velocity tracking
         lin_vel_error = torch.sum(torch.square(self._commands[:, :2] - self.robot.data.root_lin_vel_b[:, :2]), dim=1)
         lin_vel_error_mapped = torch.exp(-lin_vel_error / 0.25)
@@ -172,6 +201,15 @@ class Rob6323Go2Env(DirectRLEnv):
         rew_action_rate += torch.sum(
             torch.square(self._actions - 2 * self.last_actions[:, :, 0] + self.last_actions[:, :, 1]), dim=1
         ) * (self.cfg.action_scale**2)
+
+        # Hop-phase rewards (active until hop_complete)
+        front_vertical_force = torch.relu(contact_forces[:, :2, 2])
+        hop_front_impulse = torch.clamp(torch.sum(front_vertical_force, dim=1) - self.cfg.front_impulse_force_threshold, min=0.0)
+        hop_up_vel = torch.clamp(self.robot.data.root_lin_vel_b[:, 2], min=0.0)
+        hop_height = torch.clamp(base_height - self.cfg.hop_height_start_threshold, min=0.0)
+        hop_pitch_rate = torch.clamp(self.robot.data.root_ang_vel_b[:, 1], min=0.0)
+        front_stall_penalty = front_contact_any.float()
+        liftoff_bonus = liftoff.float()
 
         # Encourage a pitched-back posture to balance on the rear legs.
         target_pitch = 0.35
@@ -213,19 +251,28 @@ class Rob6323Go2Env(DirectRLEnv):
             "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale,
             "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,
             "raibert_heuristic": rew_raibert_heuristic * self.cfg.raibert_heuristic_reward_scale,
-            "orient": rew_orient * self.cfg.orient_reward_scale,
-            "com_over_rear": rew_com_over_rear * self.cfg.com_over_rear_reward_scale,
+            "orient": rew_orient * self.cfg.orient_reward_scale * post_hop_mask,
+            "com_over_rear": rew_com_over_rear * self.cfg.com_over_rear_reward_scale * post_hop_mask,
             "lin_vel_z": rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,
             "dof_vel": rew_dof_vel * self.cfg.dof_vel_reward_scale,
             "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,
             "feet_clearance": rew_feet_clearance * self.cfg.feet_clearence_reward_scale,
-            "rear_contact": rew_rear_contact * self.cfg.rear_contact_reward_scale,
-            "front_contact": rew_front_contact * self.cfg.front_contact_penalty_scale,
+            "rear_contact": rew_rear_contact * self.cfg.rear_contact_reward_scale * post_hop_mask,
+            "front_contact": rew_front_contact * self.cfg.front_contact_penalty_scale * post_hop_mask,
+            "front_hop_impulse": hop_front_impulse * self.cfg.front_hop_impulse_scale * hop_mask,
+            "hop_up_vel": hop_up_vel * self.cfg.hop_up_vel_scale * hop_mask,
+            "hop_height": hop_height * self.cfg.hop_height_scale * hop_mask,
+            "hop_pitch_rate": hop_pitch_rate * self.cfg.hop_pitch_rate_scale * hop_mask,
+            "front_stall_penalty": front_stall_penalty * self.cfg.front_stall_penalty_scale * hop_mask,
+            "liftoff_bonus": liftoff_bonus * self.cfg.liftoff_bonus_scale * hop_mask,
         }
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
         # Logging
         for key, value in rewards.items():
             self._episode_sums[key] += value
+
+        # Update contact history for liftoff detection
+        self.front_contact_prev = front_contact
         return reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -277,6 +324,9 @@ class Rob6323Go2Env(DirectRLEnv):
         extras["Episode_Termination/time_out"] = torch.count_nonzero(self.reset_time_outs[env_ids]).item()
         self.extras["log"].update(extras)
         self.last_actions[env_ids] = 0.0
+        self.front_contact_prev[env_ids] = False
+        self.front_air_steps[env_ids] = 0
+        self.hop_complete[env_ids] = False
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         # set visibility of markers
@@ -475,7 +525,7 @@ class Rob6323Go2Env(DirectRLEnv):
         contact_forces = self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, :]
         force_magnitude = torch.norm(contact_forces, dim=-1)
         
-        force_threshold = 1.0
+        force_threshold = self.cfg.contact_force_threshold
         contact_indicator = torch.clamp(force_magnitude / force_threshold, max=1.0)
         rear_contact = contact_indicator[:, 2:]
         front_contact = contact_indicator[:, :2]

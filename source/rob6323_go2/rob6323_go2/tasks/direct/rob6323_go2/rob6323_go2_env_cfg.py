@@ -44,6 +44,19 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     rear_contact_reward_scale = 60.0
     front_contact_penalty_scale = -80.0
     com_over_rear_reward_scale = -20.0
+    front_hop_impulse_scale = 0.5
+    hop_up_vel_scale = 1.0
+    hop_height_scale = 2.0
+    hop_pitch_rate_scale = 0.2
+    front_stall_penalty_scale = -0.5
+    liftoff_bonus_scale = 2.0
+
+    # Hop/contact thresholds
+    contact_force_threshold = 1.0
+    hop_air_time_threshold = 0.05
+    hop_height_complete_threshold = 0.32
+    hop_height_start_threshold = 0.30
+    front_impulse_force_threshold = 80.0
 
     # Additional reward scales
     orient_reward_scale = -10.0
