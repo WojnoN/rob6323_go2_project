@@ -396,65 +396,13 @@ class Rob6323Go2Env(DirectRLEnv):
 
     # Defines Contact Plan
     def _step_contact_targets(self):
-        frequencies = 3.
-        phases = 0.5
-        offsets = 0.
-        bounds = 0.
-        durations = 0.5 * torch.ones((self.num_envs,), dtype=torch.float32, device=self.device)
-        self.gait_indices = torch.remainder(self.gait_indices + self.step_dt * frequencies, 1.0)
-
-        foot_indices = [self.gait_indices + phases + offsets + bounds,
-                        self.gait_indices + offsets,
-                        self.gait_indices + bounds,
-                        self.gait_indices + phases]
-
-        self.foot_indices = torch.remainder(torch.cat([foot_indices[i].unsqueeze(1) for i in range(4)], dim=1), 1.0)
-
-        for idxs in foot_indices:
-            stance_idxs = torch.remainder(idxs, 1) < durations
-            swing_idxs = torch.remainder(idxs, 1) > durations
-
-            idxs[stance_idxs] = torch.remainder(idxs[stance_idxs], 1) * (0.5 / durations[stance_idxs])
-            idxs[swing_idxs] = 0.5 + (torch.remainder(idxs[swing_idxs], 1) - durations[swing_idxs]) * (
-                        0.5 / (1 - durations[swing_idxs]))
-
-        # self.clock_inputs[:, 0] = torch.sin(2 * np.pi * foot_indices[0])
-        # self.clock_inputs[:, 1] = torch.sin(2 * np.pi * foot_indices[1])
-        self.clock_inputs[:, 0] = torch.pi
-        self.clock_inputs[:, 1] = torch.pi
-        self.clock_inputs[:, 2] = torch.sin(2 * np.pi * foot_indices[2])
-        self.clock_inputs[:, 3] = torch.sin(2 * np.pi * foot_indices[3])
-
-        # von mises distribution
-        kappa = 0.07
-        smoothing_cdf_start = torch.distributions.normal.Normal(0, kappa).cdf  # (x) + torch.distributions.normal.Normal(1, kappa).cdf(x)) / 2
-
-        smoothing_multiplier_FL = (smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0)) * (
-                1 - smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0) - 0.5)) +
-                                    smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0) - 1) * (
-                                            1 - smoothing_cdf_start(
-                                        torch.remainder(foot_indices[0], 1.0) - 0.5 - 1)))
-        smoothing_multiplier_FR = (smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0)) * (
-                1 - smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0) - 0.5)) +
-                                    smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0) - 1) * (
-                                            1 - smoothing_cdf_start(
-                                        torch.remainder(foot_indices[1], 1.0) - 0.5 - 1)))
-        smoothing_multiplier_RL = (smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0)) * (
-                1 - smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0) - 0.5)) +
-                                    smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0) - 1) * (
-                                            1 - smoothing_cdf_start(
-                                        torch.remainder(foot_indices[2], 1.0) - 0.5 - 1)))
-        smoothing_multiplier_RR = (smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0)) * (
-                1 - smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0) - 0.5)) +
-                                    smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0) - 1) * (
-                                            1 - smoothing_cdf_start(
-                                        torch.remainder(foot_indices[3], 1.0) - 0.5 - 1)))
-
-        # Zero out front leg desired contacts; only rear legs planned for stance.
+        # Disable gait timing; hold feet indices constant and keep rear legs always in contact.
+        self.foot_indices = torch.zeros((self.num_envs, 4), device=self.device)
+        self.clock_inputs[:, :] = 0.0
         self.desired_contact_states[:, 0] = 0.0
         self.desired_contact_states[:, 1] = 0.0
-        self.desired_contact_states[:, 2] = smoothing_multiplier_RL
-        self.desired_contact_states[:, 3] = smoothing_multiplier_RR
+        self.desired_contact_states[:, 2] = 1.0
+        self.desired_contact_states[:, 3] = 1.0
 
     # Part 4.5
     def _reward_raibert_heuristic(self):
