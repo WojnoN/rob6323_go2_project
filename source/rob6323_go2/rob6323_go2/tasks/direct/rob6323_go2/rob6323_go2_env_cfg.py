@@ -94,7 +94,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
         prim_path="/World/ground",
         terrain_type="generator",
         terrain_generator=RANDOM_UNIFORM_TERRAIN_CFG,
-        max_init_terrain_level=2,
+        max_init_terrain_level=5,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
