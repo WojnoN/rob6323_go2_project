@@ -76,11 +76,13 @@ class Rob6323Go2Env(DirectRLEnv):
                 "rew_action_rate",
                 "raibert_heuristic",
                 "orient",
+                "com_over_rear",
                 "lin_vel_z",
                 "dof_vel",
                 "ang_vel_xy",
                 "feet_clearance",
-                "tracking_contacts_shaped_force"
+                "rear_contact",
+                "front_contact",
             ]
         }
         # Get specific body indices
@@ -171,11 +173,14 @@ class Rob6323Go2Env(DirectRLEnv):
             torch.square(self._actions - 2 * self.last_actions[:, :, 0] + self.last_actions[:, :, 1]), dim=1
         ) * (self.cfg.action_scale**2)
 
-        # 1. Penalize non-vertical orientation (projected gravity on XY plane)
-        # Hint: We want the robot to stay upright, so gravity should only project onto Z.
-        # Calculate the sum of squares of the X and Y components of projected_gravity_b.
-        projected_gravity_xy = self.robot.data.projected_gravity_b[:, :2]
-        rew_orient = torch.sum(torch.square(projected_gravity_xy), dim=1)
+        # Encourage a pitched-back posture to balance on the rear legs.
+        target_pitch = 0.35
+        target_gravity_b = torch.tensor(
+            [math.sin(target_pitch), 0.0, -math.cos(target_pitch)],
+            device=self.device,
+            dtype=self.robot.data.projected_gravity_b.dtype,
+        )
+        rew_orient = torch.sum(torch.square(self.robot.data.projected_gravity_b - target_gravity_b), dim=1)
 
         # 2. Penalize vertical velocity (z-component of base linear velocity)
         # Hint: Square the Z component of the base linear velocity.
@@ -189,6 +194,11 @@ class Rob6323Go2Env(DirectRLEnv):
         # Hint: Sum the squares of the X and Y components of the base angular velocity.
         rew_ang_vel_xy = torch.sum(torch.square(self.robot.data.root_ang_vel_b[:, :2]), dim=1)
 
+        # Keep the center of mass projected between the rear feet.
+        rear_mid_xy = torch.mean(self.foot_positions_w[:, 2:, :2], dim=1)
+        com_xy = self.robot.data.root_pos_w[:, :2]
+        rew_com_over_rear = torch.norm(com_xy - rear_mid_xy, dim=1)
+
         # Update the previous action hist
         self.last_actions = torch.roll(self.last_actions, 1, 2)
         self.last_actions[:, :, 0] = self._actions[:]
@@ -196,7 +206,7 @@ class Rob6323Go2Env(DirectRLEnv):
         self._step_contact_targets()
         rew_raibert_heuristic = self._reward_raibert_heuristic()
         rew_feet_clearance = self._reward_feet_clearance()
-        rew_tracking_contacts_shaped_force = self._reward_tracking_contacts_shaped_force()
+        rew_rear_contact, rew_front_contact = self._reward_tracking_contacts_shaped_force()
 
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale,
@@ -204,11 +214,13 @@ class Rob6323Go2Env(DirectRLEnv):
             "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,
             "raibert_heuristic": rew_raibert_heuristic * self.cfg.raibert_heuristic_reward_scale,
             "orient": rew_orient * self.cfg.orient_reward_scale,
+            "com_over_rear": rew_com_over_rear * self.cfg.com_over_rear_reward_scale,
             "lin_vel_z": rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,
             "dof_vel": rew_dof_vel * self.cfg.dof_vel_reward_scale,
             "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,
             "feet_clearance": rew_feet_clearance * self.cfg.feet_clearence_reward_scale,
-            "tracking_contacts_shaped_force": rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale,
+            "rear_contact": rew_rear_contact * self.cfg.rear_contact_reward_scale,
+            "front_contact": rew_front_contact * self.cfg.front_contact_penalty_scale,
         }
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
         # Logging
@@ -240,7 +252,9 @@ class Rob6323Go2Env(DirectRLEnv):
         self._actions[env_ids] = 0.0
         self._previous_actions[env_ids] = 0.0
         # Sample new commands
-        self._commands[env_ids] = torch.zeros_like(self._commands[env_ids]).uniform_(-1.0, 1.0)
+        self._commands[env_ids, 0] = torch.zeros_like(self._commands[env_ids, 0]).uniform_(0.0, 0.5)
+        self._commands[env_ids, 1] = 0.0
+        self._commands[env_ids, 2] = torch.zeros_like(self._commands[env_ids, 2]).uniform_(-0.3, 0.3)
         # Reset robot state
         joint_pos = self.robot.data.default_joint_pos[env_ids]
         joint_vel = self.robot.data.default_joint_vel[env_ids]
@@ -391,10 +405,9 @@ class Rob6323Go2Env(DirectRLEnv):
                                             1 - smoothing_cdf_start(
                                         torch.remainder(foot_indices[3], 1.0) - 0.5 - 1)))
 
-        # self.desired_contact_states[:, 0] = smoothing_multiplier_FL
-        # self.desired_contact_states[:, 1] = smoothing_multiplier_FR
-        self.desired_contact_states[:, 0] = smoothing_multiplier_FL
-        self.desired_contact_states[:, 1] = smoothing_multiplier_FR
+        # Zero out front leg desired contacts; only rear legs planned for stance.
+        self.desired_contact_states[:, 0] = 0.0
+        self.desired_contact_states[:, 1] = 0.0
         self.desired_contact_states[:, 2] = smoothing_multiplier_RL
         self.desired_contact_states[:, 3] = smoothing_multiplier_RR
 
@@ -439,23 +452,18 @@ class Rob6323Go2Env(DirectRLEnv):
     def _reward_feet_clearance(self):
         # Penalize feet too low during swing phase
         foot_heights = self.foot_positions_w[:, :, 2]
-        front_foot_heights = foot_heights[:2]
-        back_foot_heights = foot_heights[2:]
+        front_foot_heights = foot_heights[:, :2]
+        back_foot_heights = foot_heights[:, 2:]
         back_target = 0.07
-
-        front_target = 1.0
+        front_target = 0.35
         
-        # swing phase when foot_indices > 0.5
+        # swing phase when foot_indices > 0.5; force front legs to be treated as swing always
         swing_mask = self.foot_indices > 0.5
-        swing_mask[:2] = 1
+        swing_mask[:, :2] = 1
         
-        front_clearance_error = front_target - front_foot_heights
-        back_clearance_error = back_target - back_foot_heights
-        print(front_clearance_error.shape)
-        print(back_clearance_error.shape)
-        clearance_error = torch.concat((front_clearance_error, back_clearance_error), dim = 0)
-        print(clearance_error.shape)
-        clearance_error = torch.clamp(clearance_error, min=0.0)
+        front_clearance_error = torch.clamp(front_target - front_foot_heights, min=0.0)
+        back_clearance_error = torch.clamp(back_target - back_foot_heights, min=0.0)
+        clearance_error = torch.cat((front_clearance_error, back_clearance_error), dim=1)
         clearance_error = clearance_error * swing_mask.float()
         
         reward = torch.sum(torch.square(clearance_error), dim=1)
@@ -469,9 +477,10 @@ class Rob6323Go2Env(DirectRLEnv):
         
         force_threshold = 1.0
         contact_indicator = torch.clamp(force_magnitude / force_threshold, max=1.0)
-        contact_indicator[:,:2] = 0.0
+        rear_contact = contact_indicator[:, 2:]
+        front_contact = contact_indicator[:, :2]
         
-        # Reward when desired_contact_states is high and feet are in contact
-        reward = torch.sum(self.desired_contact_states * contact_indicator, dim=1)
-        return reward
-
+        # Reward when desired_contact_states is high and rear feet are in contact; penalize any front contact.
+        reward_rear = torch.sum(self.desired_contact_states[:, 2:] * rear_contact, dim=1)
+        penalty_front = torch.sum(front_contact, dim=1)
+        return reward_rear, penalty_front
