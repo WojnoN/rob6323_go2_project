@@ -251,7 +251,7 @@ class Rob6323Go2Env(DirectRLEnv):
             "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale,
             "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,
             "raibert_heuristic": rew_raibert_heuristic * self.cfg.raibert_heuristic_reward_scale,
-            "orient": rew_orient * self.cfg.orient_reward_scale * post_hop_mask,
+            "orient": rew_orient * self.cfg.orient_reward_scale,
             "com_over_rear": rew_com_over_rear * self.cfg.com_over_rear_reward_scale * post_hop_mask,
             "lin_vel_z": rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,
             "dof_vel": rew_dof_vel * self.cfg.dof_vel_reward_scale,
