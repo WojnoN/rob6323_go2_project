@@ -416,8 +416,8 @@ class Rob6323Go2Env(DirectRLEnv):
                                             1 - smoothing_cdf_start(
                                         torch.remainder(foot_indices[3], 1.0) - 0.5 - 1)))
 
-        self.desired_contact_states[:, 0] = smoothing_multiplier_FL
-        self.desired_contact_states[:, 1] = smoothing_multiplier_FR
+        self.desired_contact_states[:, 0] = 0.0
+        self.desired_contact_states[:, 1] = 0.0
         self.desired_contact_states[:, 2] = smoothing_multiplier_RL
         self.desired_contact_states[:, 3] = smoothing_multiplier_RR
 
