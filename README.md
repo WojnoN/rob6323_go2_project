@@ -337,6 +337,7 @@ This section will go over the final list of rewards at the end of it all with a 
 
 ## Additions Outside of Tutorial
 ### 1. Friction
+(Friction is currently implemented into the main branch)
 In order to introduce torque frictions into the simulator, no need will be needed to change in the config.
 All changes will take place in rob6323_go2_env.py
 
