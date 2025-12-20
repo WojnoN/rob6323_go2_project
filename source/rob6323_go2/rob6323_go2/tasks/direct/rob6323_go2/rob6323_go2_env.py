@@ -465,21 +465,14 @@ class Rob6323Go2Env(DirectRLEnv):
         return reward
 
     def _reward_tracking_contacts_shaped_force(self):
-        # Reward contact forces during stance phase
+        # Penalize contact forces when the foot is meant to be swinging
         # Use _feet_ids_sensor for contact sensor indexing
         contact_forces = self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, :]
         force_magnitude = torch.norm(contact_forces, dim=-1)
-        
-        # force_threshold = 1.0
-        # contact_indicator = torch.clamp(force_magnitude / force_threshold, max=1.0)
-        
-        # # Reward when desired_contact_states is high and feet are in contact
-        # reward = torch.sum(self.desired_contact_states * contact_indicator, dim=1)
-        
-        rew_tracking_contacts_shaped_force = 0.
-        for i in range(4):
-            rew_tracking_contacts_shaped_force += - (1 - self.desired_contact_states[:, i]) * (
-                        1 - torch.exp(-1 * contact_forces[:, i] ** 2 / 100.))
-        rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force / 4
-        return rew_tracking_contacts_shaped_force
 
+        # Penalize contact force when a foot is supposed to be in swing (desired_contact_states close to 0).
+        undesired_contact = 1.0 - self.desired_contact_states  # (num_envs, 4)
+        contact_penalty = 1 - torch.exp(-force_magnitude ** 2 / 100.0)  # (num_envs, 4)
+
+        rew_tracking_contacts_shaped_force = -(undesired_contact * contact_penalty).mean(dim=1)
+        return rew_tracking_contacts_shaped_force
