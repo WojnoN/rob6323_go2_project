@@ -114,17 +114,22 @@ class Rob6323Go2Env(DirectRLEnv):
         self.robot = Articulation(self.cfg.robot_cfg)
         self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
         self.scene.sensors["contact_sensor"] = self._contact_sensor
+        
         # add ground plane
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
         self._terrain = self.cfg.terrain.class_type(self.cfg.terrain)
+        
         # clone and replicate
         self.scene.clone_environments(copy_from_source=False)
+        
         # we need to explicitly filter collisions for CPU simulation
         if self.device == "cpu":
             self.scene.filter_collisions(global_prim_paths=[])
+        
         # add articulation to scene
         self.scene.articulations["robot"] = self.robot
+        
         # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
@@ -177,21 +182,20 @@ class Rob6323Go2Env(DirectRLEnv):
         ) * (self.cfg.action_scale**2)
 
         # 1. Penalize non-vertical orientation (projected gravity on XY plane)
-        # Hint: We want the robot to stay upright, so gravity should only project onto Z.
         # Calculate the sum of squares of the X and Y components of projected_gravity_b.
         projected_gravity_xy = self.robot.data.projected_gravity_b[:, :2]
         rew_orient = torch.sum(torch.square(projected_gravity_xy), dim=1)
 
         # 2. Penalize vertical velocity (z-component of base linear velocity)
-        # Hint: Square the Z component of the base linear velocity.
+        # Square the Z component of the base linear velocity.
         rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_b[:, 2])
 
         # 3. Penalize high joint velocities
-        # Hint: Sum the squares of all joint velocities.
+        # Sum the squares of all joint velocities.
         rew_dof_vel = torch.sum(torch.square(self.robot.data.joint_vel), dim=1)
 
         # 4. Penalize angular velocity in XY plane (roll/pitch)
-        # Hint: Sum the squares of the X and Y components of the base angular velocity.
+        # Sum the squares of the X and Y components of the base angular velocity.
         rew_ang_vel_xy = torch.sum(torch.square(self.robot.data.root_ang_vel_b[:, :2]), dim=1)
 
         # Update the previous action hist
@@ -258,10 +262,10 @@ class Rob6323Go2Env(DirectRLEnv):
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)        # 
         self.gait_indices[env_ids] = 0     
         
-        # Reset Random
+        # Reset Friction Epsilons
         self.eps_f = torch.rand(1, device=self.device)*2.5
         self.eps_mu = torch.rand(1, device=self.device)*0.3
-                                                     # Gait index reset
+                                            
         # Logging
         extras = dict()
         for key in self._episode_sums.keys():
