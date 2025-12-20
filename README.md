@@ -165,3 +165,290 @@ The suggested way to inspect these logs is via the Open OnDemand web interface:
 
 ---
 Students should only edit README.md below this line.
+
+# Changes Made Table of Contents
+The changes made will be split up into Three sections.
+1. Provided by Tutorial
+2. Rewards
+3. Additions outside of tutorial
+
+## Provided by Tutorial
+This section will not go deep into reproduction steps due to their inclusion in the tutorial.MD until step 5.
+1. Action Rewards/Penalties (Action Smoothing)
+
+By introducing a buffer to keep track of the action sequences, we can compare an action with it's previous two actions so that great disparities, which signify great change, will have a greater penalty then actions with smaller changes.
+ 
+2. Low-Level PD Controller 
+
+Implementation of a PD Controller allows for greater fine tuning and control over all the joints by calculating the torques ourselves, and thus being able to adjust each aspect of it.
+
+3. Constraints as Terminations - Height
+
+Constraints as terminations allow for a much faster training process by terminating runs that have reached a failure condition. In the case of the tutorial, that signifies when the body of the bot drops below a certain threshold.
+
+4. Raibert Hueristic (Gait):
+
+In order to work on creating foot movement in the shape of a gait, the Raibert Heuristic sets up a reward system/function that allows for the promotion certain feet movement patterns. As a result, we are able to promote the bot to move with a certain gait.
+
+
+5. Reward Refinement
+
+Four rewards get introduced in this step:
+ 1. Orientation Reward
+ 2. Linear velocity on z axis
+ 3. Joint Velocities
+ 4. Angular velocity on x and y axis
+
+ The implementation is put into two sections
+ 1. Reward setup within the Rob6323_go_2_env_cfg.py which is more of a penalty setup then rewards due to the negative calues.
+```python
+# Lines 52-55
+orient_reward_scale = -5.0
+lin_vel_z_reward_scale = -0.02
+dof_vel_reward_scale = -0.0001
+ang_vel_xy_reward_scale = -0.001
+```
+
+2. Then the per-episode implementation in Rob6323_go_2.py
+```python
+# Lines 63-75 - Adding the values to the logging
+ self._episode_sums = {
+            key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+            for key in [
+                "track_lin_vel_xy_exp",
+                "track_ang_vel_z_exp",
+                "rew_action_rate",
+                "raibert_heuristic",
+                "orient",    # <<<< Additions
+                "lin_vel_z", # <<<<
+                "dof_vel",   # <<<<
+                "ang_vel_xy" # <<<<
+            ]
+        }
+
+...
+
+#Lines 163 to 179 - Comments along with Reward Implementation
+        # 1. Penalize non-vertical orientation (projected gravity on XY plane)
+        # Hint: We want the robot to stay upright, so gravity should only project onto Z.
+        # Calculate the sum of squares of the X and Y components of projected_gravity_b.
+        projected_gravity_xy = self.robot.data.projected_gravity_b[:, :2]
+        rew_orient = torch.sum(torch.square(projected_gravity_xy), dim=1) # Square the back two components of projected gravity
+
+        # 2. Penalize vertical velocity (z-component of base linear velocity)
+        # Hint: Square the Z component of the base linear velocity.
+        rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_b[:, 2]) # Squaring the 3rd component of the root linear velocity
+
+        # 3. Penalize high joint velocities
+        # Hint: Sum the squares of all joint velocities.
+        rew_dof_vel = torch.sum(torch.square(self.robot.data.joint_vel), dim=1) # Squaring all joint velocities
+
+        # 4. Penalize angular velocity in XY plane (roll/pitch)
+        # Hint: Sum the squares of the X and Y components of the base angular velocity.
+        rew_ang_vel_xy = torch.sum(torch.square(self.robot.data.root_ang_vel_b[:, :2]), dim=1) # Summing the squares of the back two values of angular velocity
+
+...
+
+# Lines 188 to 197 - Implementation into the rewards array
+ rewards = {
+            "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale,
+            "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale,
+            "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,
+            "raibert_heuristic": rew_raibert_heuristic * self.cfg.raibert_heuristic_reward_scale,
+            "orient": rew_orient * self.cfg.orient_reward_scale,                # <<<< New Additions
+            "lin_vel_z": rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,       # <<<<
+            "dof_vel": rew_dof_vel * self.cfg.dof_vel_reward_scale,             # <<<<
+            "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,    # <<<<
+        }
+```
+
+
+
+ 
+6. Advanced Foot Interactions
+In this step we implement rewards which help implement a smooth gait, foot clearance and contact forces. Foot clearance will allow for a reward or penalty to be administered at a certain step in the gait. The contact forces will allow for a reward or penalty to be applied if contact is being made at a certain time.
+```python
+    # Lines 52-56 - Setting up the feet IDS
+        self._feet_ids = []
+        for name in foot_names:
+            id_list, _ = self.robot.find_bodies(name)
+            self._feet_ids.append(id_list[0])
+
+        # Lines 58-62  - Setting up the arrays for the foot contact sensors
+        self._feet_ids_sensor = []
+        for name in foot_names:
+            id_list, _ = self._contact_sensor.find_bodies(name)
+            self._feet_ids_sensor.append(id_list[0])
+
+    ...
+
+    # Lines 198-199 - Adding the rewards via functions
+        rew_feet_clearance = self._reward_feet_clearance()
+        rew_tracking_contacts_shaped_force = self._reward_tracking_contacts_shaped_force()
+
+
+    # Lines 201-212 Adding to the rewards list
+    rewards = {
+            "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale,
+            "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale,
+            "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,
+            "raibert_heuristic": rew_raibert_heuristic * self.cfg.raibert_heuristic_reward_scale,
+            "orient": rew_orient * self.cfg.orient_reward_scale,
+            "lin_vel_z": rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,
+            "dof_vel": rew_dof_vel * self.cfg.dof_vel_reward_scale,
+            "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,
+            "feet_clearance": rew_feet_clearance * self.cfg.feet_clearence_reward_scale, # <<<
+            "tracking_contacts_shaped_force": rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale, # <<<<
+        }
+
+    ...
+
+
+```
+
+## Final Reward Values
+This section will go over the final list of rewards at the end of it all with a small reasoning to the value.
+
+```Python
+# Termination Conditions
+    base_height_min = 0.20  # Termination height, ends the run if the body of the robot drops below. Speeds up training
+
+    # PD Control gains
+    Kp = 20.0
+    Kd = 0.5
+    torque_limits = 100.0
+
+    # Reward Scales
+    raibert_heuristic_reward_scale = -10.0             # Penalize out of sync legs to help promote a smoother gait
+    feet_clearence_reward_scale = -60.0                # Penalize legs being in the wrong position during a step
+    tracking_contacts_shaped_force_reward_scale = 40.0 # Reward proper contact or lack there of as needed
+
+    # Additional reward scales - Scales that get applied frequently and thus need a lower value.
+    orient_reward_scale = -5.0        # Penalize improper body orientation to reinforce stability
+    lin_vel_z_reward_scale = -0.02    # Penalize incorrect movements on the z axis to reinforce proper direction
+    dof_vel_reward_scale = -0.0001    # Penalize torque usage above the limits of the robot to create realistic movements
+    ang_vel_xy_reward_scale = -0.001  # Penalize incorrect rotations to maintain a stable body.
+
+    action_rate_reward_scale = -0.1 # Penalize actions that are too large to prevent rapid joint acceleration and promote smooth movements
+    lin_vel_reward_scale = 1.0      # Reward movement in the right direction
+    yaw_rate_reward_scale = 0.5     # Reward facing the correct direction.
+```
+
+
+## Additions Outside of Tutorial
+### 1. Friction
+In order to introduce torque frictions into the simulator, no need will be needed to change in the config.
+All changes will take place in rob6323_go2_env.py
+
+#### Intiializing Friction for episodes:
+The friction can be increased or decreased based on changing the number at the end, creating a random number between 0 and that upper bound.
+```python
+# Within the __init__ function, add the following
+
+        # Friction epsilons
+        self.eps_f = torch.rand(1, device=self.device)*2.5
+        self.eps_mu = torch.rand(1, device=self.device)*0.3
+```
+
+```python
+# Within _reset_idx, apply the same lines load a new value on reset
+
+        # Reset Random
+        self.eps_f = torch.rand(1, device=self.device)*2.5
+        self.eps_mu = torch.rand(1, device=self.device)*0.3
+```
+
+#### Applying friction to the torque
+
+When calculating the friction, you calculate the stictoin and viscous frictions separately, before adding them together to get the friction.
+
+Afterwards, you add them together to get the total friction.
+
+Lastly you subtract from the calculated torques.
+```python
+# Within the _apply_action function
+
+# Friction calculation
+        stiction = self.eps_f * torch.tanh(self.robot.data.joint_vel / 0.1)
+        viscous = self.eps_mu * self.robot.data.joint_vel
+        friction_torque = stiction + viscous
+
+# ---------------  Leave untouched --------------------
+        # PD Control Law
+        torques = torch.clip(
+            (
+                self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos) -
+                self.Kd * self.robot.data.joint_vel
+            ), -self.torque_limits, self.torque_limits
+        )
+# -----------------------------------------------------
+
+        self.robot.set_joint_effort_target(torques-friction_torque) # <<<< Subtract friction_torque from the torque
+```
+
+
+### 2. Rough Terrain
+(To run a training with rough terrain in  this fork, switch to SmallerTerrainTesting branch)
+All additions for this section will be implemented within the rob6323_go2_env_cfg.py.
+
+#### Imports
+The following imports are additional to the existing ones:
+```python
+from isaaclab.sim import PhysxCfg
+from isaaclab.terrains import TerrainGeneratorCfg
+from isaaclab.terrains.height_field import HfRandomUniformTerrainCfg
+```
+
+
+#### Setting up the new terrain.
+Most notes will be taken directly from the [Isaac Lab Documentation](https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.terrains.html#isaaclab.terrains.TerrainGeneratorCfg)x
+
+Below the simulator function, add the following:
+```python
+    # random-uniform terrain generator (height-field)
+    RANDOM_UNIFORM_TERRAIN_CFG = TerrainGeneratorCfg(
+        curriculum=False,                 # random (not row-based curriculum)
+        difficulty_range=(0.0, 1.0),      # difficulty sampled U(low, high) when curriculum=False
+        size=(8.0, 8.0),                  # sub-terrain size in meters 
+        num_rows=10,                      # Number of rows of sub-terrains to generate.
+        num_cols=20,                      # Number of columns of sub-terrains to generate.
+        horizontal_scale=0.1,             # The discretization of the terrain along the x and y axes (in m).
+        vertical_scale=0.005,             # The discretization of the terrain along the z axis (in m).
+        slope_threshold=0.75,             # The slope threshold above which surfaces are made vertical.
+        sub_terrains={
+            "hf_random_uniform": HfRandomUniformTerrainCfg(
+                proportion=1.0,            # always choose this terrain type 
+                noise_range=(0.0, 0.06),   # min/max height noise (m) 
+                noise_step=0.01,           # height quantization step (m) 
+                # downsampled_scale=0.2,   # optional: sample on coarser grid then interpolate
+            )
+        },
+    )
+```
+
+Make the following changes to the existing TerrainImporterConfig
+```python
+    # terrain
+    terrain = TerrainImporterCfg(
+        prim_path="/World/ground",
+        terrain_type="generator",                        # <<<< Change
+        terrain_generator=RANDOM_UNIFORM_TERRAIN_CFG,    # <<<< Added
+        max_init_Terrain_level= 2,                       # <<<< Added
+        collision_group=-1,
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            friction_combine_mode="multiply",
+            restitution_combine_mode="multiply",
+            static_friction=1.0,
+            dynamic_friction=1.0,
+            restitution=0.0,
+        ),
+        debug_vis=False,
+    )
+```
+
+#### Notes for Changes
+Changes aren't necessary in the other file since there are already important aspects included necessary for traversing rough terrain.
+
+The maximum height of the bumps/edges is at .06 currently (noise range variable upper bound) while the gait checks look for the robot to lift its feet above .07, thus clearing existing obstacles.
+
+As for orientation, there are rewards and penalties put in place to maintain a level body for the robot as well.
