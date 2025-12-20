@@ -41,7 +41,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # Reward Scales
     raibert_heuristic_reward_scale = -10.0
     feet_clearence_reward_scale = -60.0
-    tracking_contacts_shaped_force_reward_scale = 40.0
+    tracking_contacts_shaped_force_reward_scale = 4.0
 
     # Additional reward scales
     orient_reward_scale = -5.0
